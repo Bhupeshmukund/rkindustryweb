@@ -1,0 +1,9 @@
+# Enable CORS for API
+Header set Access-Control-Allow-Origin "*"
+Header set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+Header set Access-Control-Allow-Headers "Content-Type, Authorization"
+
+# Handle Node.js routing (if using Apache with Node.js)
+RewriteEngine On
+RewriteRule ^api/(.*)$ http://localhost:5000/api/$1 [P,L]
+
