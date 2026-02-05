@@ -51,6 +51,7 @@ const mapProductsFromRows = rows => {
         name: row.product_name,
         image: getImageUrl(row.product_image),
         description: row.product_description,
+        additionalDescription: row.product_additional_description || null,
         categoryId: row.category_id,
         categorySlug: row.category_slug,
         categoryName: row.category_name,
@@ -194,6 +195,7 @@ router.get("/products/:id", async (req, res) => {
          p.name,
          p.image,
          p.description,
+         p.additional_description,
          p.is_active,
          c.slug as category_slug,
          c.name as category_name
@@ -218,6 +220,7 @@ router.get("/products/:id", async (req, res) => {
          p.name as product_name,
          p.image as product_image,
          p.description as product_description,
+         p.additional_description as product_additional_description,
          p.category_id as category_id,
          c.slug as category_slug,
          c.name as category_name,

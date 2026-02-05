@@ -1,8 +1,54 @@
 import express from "express";
 import { db } from "../config/db.js";
 import { uploadProductImages, uploadProductImage } from "../middleware/upload.js";
+import jwt from "jsonwebtoken";
 
 const router = express.Router();
+
+// TinyMCE image upload endpoint
+router.post("/upload-image", uploadProductImage.single("file"), async (req, res) => {
+  try {
+    // Check authentication
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Authorization token required" });
+    }
+
+    const token = authHeader.substring(7);
+    try {
+      jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
+    } catch (err) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    // For TinyMCE, we need to return absolute URLs to avoid path resolution issues
+    // This prevents URLs like /product/backend/uploads/... when on /product/:id page
+    const imagePath = `/uploads/products/${req.file.filename}`;
+    let imageUrl;
+    
+    if (process.env.NODE_ENV === 'production') {
+      // Return full absolute URL for production
+      const protocol = req.protocol || 'https';
+      const host = req.get('host') || 'rkindustriesexports.com';
+      imageUrl = `${protocol}://${host}/backend${imagePath}`;
+    } else {
+      // For development, use localhost
+      imageUrl = `http://localhost:5000${imagePath}`;
+    }
+    
+    // TinyMCE expects the response in this format
+    res.json({
+      location: imageUrl
+    });
+  } catch (err) {
+    console.error("IMAGE UPLOAD ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Helper function to handle image URLs for both production and local
 const getImageUrl = (imagePath) => {
@@ -25,6 +71,7 @@ const mapProductsFromRows = rows => {
         name: row.product_name,
         image: getImageUrl(row.product_image),
         description: row.product_description,
+        additionalDescription: row.product_additional_description || null,
         categoryId: row.category_id,
         categoryName: row.category_name,
         isActive: row.is_active === undefined ? 1 : row.is_active,
@@ -91,6 +138,7 @@ router.get("/products", async (_req, res) => {
          p.name as product_name,
          p.image as product_image,
          p.description as product_description,
+         p.additional_description as product_additional_description,
          p.category_id as category_id,
          c.name as category_name,
          p.is_active as is_active,
@@ -130,6 +178,7 @@ router.post(
         categoryName,
         productName,
         description,
+        additionalDescription,
         variants
       } = req.body;
 
@@ -156,13 +205,14 @@ router.post(
       }
 
       const [productResult] = await db.query(
-        `INSERT INTO products (category_id, name, image, description, is_active)
-         VALUES (?, ?, ?, ?, COALESCE(?, 1))`,
+        `INSERT INTO products (category_id, name, image, description, additional_description, is_active)
+         VALUES (?, ?, ?, ?, ?, COALESCE(?, 1))`,
         [
           category.id,
           productName,
           `/uploads/products/${mainFile.filename}`,
           description,
+          additionalDescription || null,
           1
         ]
       );
@@ -327,7 +377,7 @@ router.get("/products/:productId/edit", async (req, res) => {
     const { productId } = req.params;
 
     const [[productRow]] = await db.query(
-      `SELECT id, category_id, name, image, description, is_active FROM products WHERE id = ?`,
+      `SELECT id, category_id, name, image, description, additional_description, is_active FROM products WHERE id = ?`,
       [productId]
     );
 
@@ -542,7 +592,7 @@ router.put("/products/:id", uploadProductImages.fields([
 ]), async (req, res) => {
   try {
     const { id } = req.params;
-    const { categoryName, productName, description, keepImageIds, variants } = req.body;
+    const { categoryName, productName, description, additionalDescription, keepImageIds, variants } = req.body;
 
     console.log("=== PRODUCT UPDATE REQUEST ===");
     console.log("Product ID:", id);
@@ -603,6 +653,13 @@ router.put("/products/:id", uploadProductImages.fields([
       updateFields.push("description = ?");
       updateValues.push(description || "");
       console.log("Will update description");
+    }
+
+    if (additionalDescription !== undefined && additionalDescription !== null) {
+      // Allow empty additional description
+      updateFields.push("additional_description = ?");
+      updateValues.push(additionalDescription || "");
+      console.log("Will update additional_description");
     }
 
     if (categoryId !== null && categoryId !== undefined) {
