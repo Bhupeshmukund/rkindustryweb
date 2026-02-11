@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { fetchUSDToINR, isIndia, formatEmailPrice } from './emailPriceHelper.js';
 
 // Create reusable transporter object using SMTP transport
 // Note: Authenticate with the main account (bhupesh@rkindustriesexports.com)
@@ -22,6 +23,7 @@ transporter.verify(function (error, success) {
   }
 });
 
+
 /**
  * Send order confirmation email to customer
  */
@@ -39,12 +41,21 @@ export const sendOrderConfirmationEmail = async (customerEmail, orderData) => {
       return `${baseUrl}${imagePath.startsWith('/') ? '' : '/'}${imagePath}`;
     };
 
+    // Check if order is from India and get exchange rate
+    const orderIsIndia = isIndia(billing?.country);
+    const exchangeRate = orderIsIndia ? await fetchUSDToINR() : 1;
+    
+    // Helper to format price
+    const formatPrice = (price) => formatEmailPrice(price, billing?.country, exchangeRate);
+
     // Build order items HTML
     const itemsHtml = items.map(item => {
       const attributes = item.attributes && item.attributes.length > 0
         ? ` (${item.attributes.map(attr => `${attr.name}: ${attr.value}`).join(', ')})`
         : '';
       const imageUrl = getImageUrl(item.image);
+      const itemPrice = formatPrice(item.price);
+      const itemTotal = formatPrice(item.price * item.quantity);
       return `
         <tr>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">
@@ -52,8 +63,8 @@ export const sendOrderConfirmationEmail = async (customerEmail, orderData) => {
           </td>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}${attributes}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${parseFloat(item.price).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${(parseFloat(item.price) * item.quantity).toFixed(2)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemPrice}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemTotal}</td>
         </tr>
       `;
     }).join('');
@@ -108,7 +119,7 @@ export const sendOrderConfirmationEmail = async (customerEmail, orderData) => {
             </table>
 
             <div class="order-info">
-              <p style="text-align: right;"><span class="total">Total Amount: $${parseFloat(total).toFixed(2)}</span></p>
+              <p style="text-align: right;"><span class="total">Total Amount: ${formatPrice(total)}</span></p>
             </div>
 
             <div class="order-info">
@@ -121,7 +132,7 @@ export const sendOrderConfirmationEmail = async (customerEmail, orderData) => {
             </div>
 
             <p>We will send you another email once your order has been shipped.</p>
-            <p>If you have any questions, please contact us at rkindustriesexports@gmail.com</p>
+            <p>If you have any questions, please contact us at sales@rkindustriesexports.com</p>
           </div>
           <div class="footer">
             <p>RK Industries Exports<br>
@@ -165,12 +176,27 @@ export const sendAdminOrderNotification = async (adminEmail, orderData) => {
       return `${baseUrl}${imagePath.startsWith('/') ? '' : '/'}${imagePath}`;
     };
 
+    // Check if order is from India and get exchange rate (for admin, show both currencies)
+    const orderIsIndia = isIndia(billing?.country);
+    const exchangeRate = orderIsIndia ? await fetchUSDToINR() : 1;
+    
+    // Helper to format price (admin sees both USD and INR if India)
+    const formatPrice = (price) => {
+      if (orderIsIndia) {
+        const inrPrice = parseFloat(price) * exchangeRate;
+        return `$${parseFloat(price).toFixed(2)} (₹${inrPrice.toFixed(2)})`;
+      }
+      return `$${parseFloat(price).toFixed(2)}`;
+    };
+
     // Build order items HTML
     const itemsHtml = items.map(item => {
       const attributes = item.attributes && item.attributes.length > 0
         ? ` (${item.attributes.map(attr => `${attr.name}: ${attr.value}`).join(', ')})`
         : '';
       const imageUrl = getImageUrl(item.image);
+      const itemPrice = formatPrice(item.price);
+      const itemTotal = formatPrice(item.price * item.quantity);
       return `
         <tr>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">
@@ -178,8 +204,8 @@ export const sendAdminOrderNotification = async (adminEmail, orderData) => {
           </td>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}${attributes}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${parseFloat(item.price).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${(parseFloat(item.price) * item.quantity).toFixed(2)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemPrice}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemTotal}</td>
         </tr>
       `;
     }).join('');
@@ -237,7 +263,7 @@ export const sendAdminOrderNotification = async (adminEmail, orderData) => {
             </table>
 
             <div class="order-info">
-              <p style="text-align: right;"><span class="total">Total Amount: $${parseFloat(total).toFixed(2)}</span></p>
+              <p style="text-align: right;"><span class="total">Total Amount: ${formatPrice(total)}</span></p>
             </div>
 
             <div class="order-info">
@@ -289,12 +315,21 @@ export const sendPaymentVerificationPendingEmail = async (customerEmail, orderDa
       return `${baseUrl}${imagePath.startsWith('/') ? '' : '/'}${imagePath}`;
     };
 
+    // Check if order is from India and get exchange rate
+    const orderIsIndia = isIndia(billing?.country);
+    const exchangeRate = orderIsIndia ? await fetchUSDToINR() : 1;
+    
+    // Helper to format price
+    const formatPrice = (price) => formatEmailPrice(price, billing?.country, exchangeRate);
+
     // Build order items HTML
     const itemsHtml = items.map(item => {
       const attributes = item.attributes && item.attributes.length > 0
         ? ` (${item.attributes.map(attr => `${attr.name}: ${attr.value}`).join(', ')})`
         : '';
       const imageUrl = getImageUrl(item.image);
+      const itemPrice = formatPrice(item.price);
+      const itemTotal = formatPrice(item.price * item.quantity);
       return `
         <tr>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">
@@ -302,8 +337,8 @@ export const sendPaymentVerificationPendingEmail = async (customerEmail, orderDa
           </td>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}${attributes}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${parseFloat(item.price).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${(parseFloat(item.price) * item.quantity).toFixed(2)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemPrice}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemTotal}</td>
         </tr>
       `;
     }).join('');
@@ -365,7 +400,7 @@ export const sendPaymentVerificationPendingEmail = async (customerEmail, orderDa
             </table>
 
             <div class="order-info">
-              <p style="text-align: right;"><span class="total">Total Amount: $${parseFloat(total).toFixed(2)}</span></p>
+              <p style="text-align: right;"><span class="total">Total Amount: ${formatPrice(total)}</span></p>
             </div>
 
             <div class="order-info">
@@ -422,12 +457,21 @@ export const sendPaymentConfirmedEmail = async (customerEmail, orderData) => {
       return `${baseUrl}${imagePath.startsWith('/') ? '' : '/'}${imagePath}`;
     };
 
+    // Check if order is from India and get exchange rate
+    const orderIsIndia = isIndia(billing?.country);
+    const exchangeRate = orderIsIndia ? await fetchUSDToINR() : 1;
+    
+    // Helper to format price
+    const formatPrice = (price) => formatEmailPrice(price, billing?.country, exchangeRate);
+
     // Build order items HTML
     const itemsHtml = items.map(item => {
       const attributes = item.attributes && item.attributes.length > 0
         ? ` (${item.attributes.map(attr => `${attr.name}: ${attr.value}`).join(', ')})`
         : '';
       const imageUrl = getImageUrl(item.image);
+      const itemPrice = formatPrice(item.price);
+      const itemTotal = formatPrice(item.price * item.quantity);
       return `
         <tr>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">
@@ -435,8 +479,8 @@ export const sendPaymentConfirmedEmail = async (customerEmail, orderData) => {
           </td>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}${attributes}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${parseFloat(item.price).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${(parseFloat(item.price) * item.quantity).toFixed(2)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemPrice}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemTotal}</td>
         </tr>
       `;
     }).join('');
@@ -497,7 +541,7 @@ export const sendPaymentConfirmedEmail = async (customerEmail, orderData) => {
             </table>
 
             <div class="order-info">
-              <p style="text-align: right;"><span class="total">Total Amount: $${parseFloat(total).toFixed(2)}</span></p>
+              <p style="text-align: right;"><span class="total">Total Amount: ${formatPrice(total)}</span></p>
             </div>
 
             <div class="order-info">
@@ -554,12 +598,21 @@ export const sendOrderCompletedEmail = async (customerEmail, orderData) => {
       return `${baseUrl}${imagePath.startsWith('/') ? '' : '/'}${imagePath}`;
     };
 
+    // Check if order is from India and get exchange rate
+    const orderIsIndia = isIndia(billing?.country);
+    const exchangeRate = orderIsIndia ? await fetchUSDToINR() : 1;
+    
+    // Helper to format price
+    const formatPrice = (price) => formatEmailPrice(price, billing?.country, exchangeRate);
+
     // Build order items HTML
     const itemsHtml = items.map(item => {
       const attributes = item.attributes && item.attributes.length > 0
         ? ` (${item.attributes.map(attr => `${attr.name}: ${attr.value}`).join(', ')})`
         : '';
       const imageUrl = getImageUrl(item.image);
+      const itemPrice = formatPrice(item.price);
+      const itemTotal = formatPrice(item.price * item.quantity);
       return `
         <tr>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">
@@ -567,8 +620,8 @@ export const sendOrderCompletedEmail = async (customerEmail, orderData) => {
           </td>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}${attributes}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${parseFloat(item.price).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${(parseFloat(item.price) * item.quantity).toFixed(2)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemPrice}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemTotal}</td>
         </tr>
       `;
     }).join('');
@@ -629,7 +682,7 @@ export const sendOrderCompletedEmail = async (customerEmail, orderData) => {
             </table>
 
             <div class="order-info">
-              <p style="text-align: right;"><span class="total">Total Amount: $${parseFloat(total).toFixed(2)}</span></p>
+              <p style="text-align: right;"><span class="total">Total Amount: ${formatPrice(total)}</span></p>
             </div>
 
             <div class="order-info">
@@ -686,12 +739,21 @@ export const sendOrderCancelledEmail = async (customerEmail, orderData) => {
       return `${baseUrl}${imagePath.startsWith('/') ? '' : '/'}${imagePath}`;
     };
 
+    // Check if order is from India and get exchange rate
+    const orderIsIndia = isIndia(billing?.country);
+    const exchangeRate = orderIsIndia ? await fetchUSDToINR() : 1;
+    
+    // Helper to format price
+    const formatPrice = (price) => formatEmailPrice(price, billing?.country, exchangeRate);
+
     // Build order items HTML
     const itemsHtml = items.map(item => {
       const attributes = item.attributes && item.attributes.length > 0
         ? ` (${item.attributes.map(attr => `${attr.name}: ${attr.value}`).join(', ')})`
         : '';
       const imageUrl = getImageUrl(item.image);
+      const itemPrice = formatPrice(item.price);
+      const itemTotal = formatPrice(item.price * item.quantity);
       return `
         <tr>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">
@@ -699,8 +761,8 @@ export const sendOrderCancelledEmail = async (customerEmail, orderData) => {
           </td>
           <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}${attributes}</td>
           <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${parseFloat(item.price).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${(parseFloat(item.price) * item.quantity).toFixed(2)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemPrice}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${itemTotal}</td>
         </tr>
       `;
     }).join('');
@@ -769,7 +831,7 @@ export const sendOrderCancelledEmail = async (customerEmail, orderData) => {
             </table>
 
             <div class="order-info">
-              <p style="text-align: right;"><span class="total">Total Amount: $${parseFloat(total).toFixed(2)}</span></p>
+              <p style="text-align: right;"><span class="total">Total Amount: ${formatPrice(total)}</span></p>
             </div>
 
             <p>If you have any questions about this cancellation or would like to place a new order, please contact us at sales@rkindustriesexports.com</p>
@@ -796,6 +858,147 @@ export const sendOrderCancelledEmail = async (customerEmail, orderData) => {
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error('Error sending order cancelled email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send thank you email to user after contact form submission
+ */
+export const sendContactThankYouEmail = async (customerEmail, contactData) => {
+  try {
+    const { name, email, message } = contactData;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #00ACEE; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+          .message-box { background: white; padding: 15px; margin: 15px 0; border-radius: 4px; border-left: 4px solid #00ACEE; }
+          .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Thank You for Contacting Us</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${name},</p>
+            <p>Thank you for reaching out to RK Industries Exports! We have received your message and our team will get back to you shortly.</p>
+            
+            <div class="message-box">
+              <h3 style="margin-top: 0;">Your Message:</h3>
+              <p style="white-space: pre-wrap;">${message}</p>
+            </div>
+
+            <p>We typically respond within 24-48 hours. If your inquiry is urgent, please feel free to call us at:</p>
+            <p><strong>Phone:</strong> +91-8685933785 / +91-9896099653</p>
+            <p><strong>Email:</strong> sales@rkindustriesexports.com</p>
+
+            <p>We appreciate your interest in our products and services.</p>
+            <p>Best regards,<br>RK Industries Exports Team</p>
+          </div>
+          <div class="footer">
+            <p>RK Industries Exports<br>
+            Thank you for your inquiry!</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Use the same transporter but send from info@ email address
+    const mailOptions = {
+      from: `"RK Industries Exports" <info@rkindustriesexports.com>`,
+      to: customerEmail,
+      subject: `Thank You for Contacting RK Industries Exports`,
+      html: htmlContent
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Contact thank you email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending contact thank you email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send contact form notification email to admin
+ */
+export const sendContactAdminNotification = async (adminEmail, contactData) => {
+  try {
+    const { name, email, message } = contactData;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #dc3545; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+          .alert { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 4px; }
+          .message-box { background: white; padding: 15px; margin: 15px 0; border-radius: 4px; border-left: 4px solid #dc3545; }
+          .info-box { background: white; padding: 15px; margin: 15px 0; border-radius: 4px; }
+          .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>New Contact Form Submission</h1>
+          </div>
+          <div class="content">
+            <div class="alert">
+              <strong>New Message Alert!</strong> A new message has been received through the contact form.
+            </div>
+            
+            <div class="info-box">
+              <h3 style="margin-top: 0;">Contact Information</h3>
+              <p><strong>Name:</strong> ${name}</p>
+              <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
+              <p><strong>Submitted:</strong> ${new Date().toLocaleString('en-IN')}</p>
+            </div>
+
+            <div class="message-box">
+              <h3 style="margin-top: 0;">Message:</h3>
+              <p style="white-space: pre-wrap;">${message}</p>
+            </div>
+
+            <p><strong>Action Required:</strong> Please respond to this inquiry at your earliest convenience.</p>
+            <p>You can reply directly to: <a href="mailto:${email}">${email}</a></p>
+          </div>
+          <div class="footer">
+            <p>RK Industries Exports Admin</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const mailOptions = {
+      from: `"RK Industries Exports" <${process.env.SMTP_USER || 'sales@rkindustriesexports.com'}>`,
+      to: adminEmail,
+      subject: `New Contact Form Message from ${name}`,
+      html: htmlContent,
+      replyTo: email // Allow admin to reply directly to the customer
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Contact admin notification email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending contact admin notification email:', error);
     return { success: false, error: error.message };
   }
 };

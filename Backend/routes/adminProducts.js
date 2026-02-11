@@ -542,6 +542,47 @@ router.delete("/variants/:id", async (req, res) => {
   }
 });
 
+// Bulk delete variants
+router.post("/variants/bulk-delete", async (req, res) => {
+  try {
+    const { variantIds } = req.body;
+
+    if (!variantIds || !Array.isArray(variantIds) || variantIds.length === 0) {
+      return res.status(400).json({ error: "variantIds array is required" });
+    }
+
+    // Validate all IDs are numbers
+    const validIds = variantIds.filter(id => Number.isInteger(Number(id)) && Number(id) > 0);
+    if (validIds.length === 0) {
+      return res.status(400).json({ error: "Invalid variant IDs provided" });
+    }
+
+    // Create placeholders for the IN clause
+    const placeholders = validIds.map(() => "?").join(",");
+
+    // Delete variant attributes first (foreign key constraint)
+    await db.query(
+      `DELETE FROM variant_attributes WHERE variant_id IN (${placeholders})`,
+      validIds
+    );
+
+    // Delete variants
+    const [result] = await db.query(
+      `DELETE FROM product_variants WHERE id IN (${placeholders})`,
+      validIds
+    );
+
+    res.json({ 
+      success: true, 
+      deleted: result.affectedRows,
+      message: `Successfully deleted ${result.affectedRows} variant(s)` 
+    });
+  } catch (err) {
+    console.error("BULK VARIANT DELETE ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.delete("/products/:id", async (req, res) => {
   try {
     const { id } = req.params;

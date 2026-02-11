@@ -5,7 +5,7 @@ import { db } from "../config/db.js";
 import { uploadPaymentProof } from "../middleware/upload.js";
 import Razorpay from "razorpay";
 import crypto from "crypto";
-import { sendOrderConfirmationEmail, sendAdminOrderNotification, sendPaymentVerificationPendingEmail } from "../utils/emailService.js";
+import { sendOrderConfirmationEmail, sendAdminOrderNotification, sendPaymentVerificationPendingEmail, sendContactThankYouEmail, sendContactAdminNotification } from "../utils/emailService.js";
 
 const router = express.Router();
 
@@ -808,7 +808,7 @@ router.post("/create-order", uploadPaymentProof.single("paymentProof"), async (r
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
-    const { billing, items, subtotal, shipping, gst, total, paymentMethod } = req.body;
+    const { billing, items, subtotal, gst, total, paymentMethod } = req.body;
     
     // Parse JSON fields if they are strings
     const billingData = typeof billing === 'string' ? JSON.parse(billing) : billing;
@@ -833,7 +833,7 @@ router.post("/create-order", uploadPaymentProof.single("paymentProof"), async (r
        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
       [
         decoded.userId,
-        total || (subtotal + shipping + (gst || 0)),
+        total || (subtotal + (gst || 0)),
         "pending",
         paymentMethod || "bank",
         paymentProofPath,
@@ -885,7 +885,7 @@ router.post("/create-order", uploadPaymentProof.single("paymentProof"), async (r
         image: item.image || null,
         attributes: item.attributes || []
       })),
-      total: total || (subtotal + shipping + (gst || 0)),
+      total: total || (subtotal + (gst || 0)),
       billing: billingData,
       paymentMethod: paymentMethod || "bank",
       customerEmail: userEmail,
@@ -990,7 +990,7 @@ router.post("/verify-razorpay-payment", async (req, res) => {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature, billing, items, subtotal, shipping, gst, total } = req.body;
+    const { razorpayOrderId, razorpayPaymentId, razorpaySignature, billing, items, subtotal, gst, total } = req.body;
 
     if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
       return res.status(400).json({ error: "Payment verification details are required" });
@@ -1021,7 +1021,7 @@ router.post("/verify-razorpay-payment", async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
       [
         decoded.userId,
-        total || (subtotal + shipping + (gst || 0)),
+        total || (subtotal + (gst || 0)),
         "paid", // Set status as paid since payment is verified
         "razorpay",
         JSON.stringify({ orderId: razorpayOrderId, paymentId: razorpayPaymentId, signature: razorpaySignature }),
@@ -1073,7 +1073,7 @@ router.post("/verify-razorpay-payment", async (req, res) => {
         image: item.image || null,
         attributes: item.attributes || []
       })),
-      total: total || (subtotal + shipping + (gst || 0)),
+      total: total || (subtotal + (gst || 0)),
       billing: billingData,
       paymentMethod: "razorpay",
       customerEmail: userEmail,
@@ -1101,6 +1101,52 @@ router.post("/verify-razorpay-payment", async (req, res) => {
   } catch (err) {
     console.error("VERIFY RAZORPAY PAYMENT ERROR:", err);
     res.status(500).json({ error: err.message || "Failed to verify payment" });
+  }
+});
+
+// Contact form submission route
+router.post("/contact", async (req, res) => {
+  try {
+    const { name, email, message } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !message) {
+      return res.status(400).json({ error: "Name, email, and message are required" });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: "Invalid email format" });
+    }
+
+    // Prepare contact data for emails
+    const contactData = {
+      name: name.trim(),
+      email: email.trim(),
+      message: message.trim()
+    };
+
+    // Send emails asynchronously (don't block response)
+    Promise.all([
+      // Send thank you email to customer
+      sendContactThankYouEmail(contactData.email, contactData),
+      // Send notification email to admin
+      sendContactAdminNotification('sales@rkindustriesexports.com', contactData)
+    ]).then(results => {
+      console.log('Contact form email sending results:', results);
+    }).catch(err => {
+      console.error('Error sending contact form emails:', err);
+      // Don't fail the contact submission if email fails
+    });
+
+    res.json({
+      success: true,
+      message: "Thank you for your message! We will get back to you shortly."
+    });
+  } catch (err) {
+    console.error("CONTACT FORM ERROR:", err);
+    res.status(500).json({ error: err.message || "Failed to submit contact form" });
   }
 });
 
