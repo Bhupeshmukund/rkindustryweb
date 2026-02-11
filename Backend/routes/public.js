@@ -5,6 +5,7 @@ import { db } from "../config/db.js";
 import { uploadPaymentProof } from "../middleware/upload.js";
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import { sendOrderConfirmationEmail, sendAdminOrderNotification, sendPaymentVerificationPendingEmail } from "../utils/emailService.js";
 
 const router = express.Router();
 
@@ -24,19 +25,22 @@ const getImageUrl = (imagePath) => {
 };
 
 const buildPriceRange = variants => {
-  if (!variants?.length) return "";
+  if (!variants?.length) return null;
   const prices = variants
     .map(v => Number(v.price))
     .filter(p => Number.isFinite(p));
 
-  if (!prices.length) return "";
+  if (!prices.length) return null;
 
   const min = Math.min(...prices);
   const max = Math.max(...prices);
 
-  return min === max
-    ? `Rs. ${min}`
-    : `Rs. ${min} - ${max}`;
+  // Return raw price data for frontend to format based on currency
+  return {
+    min,
+    max,
+    single: min === max ? min : null
+  };
 };
 
 const mapProductsFromRows = rows => {
@@ -860,6 +864,53 @@ router.post("/create-order", uploadPaymentProof.single("paymentProof"), async (r
       );
     }
 
+    // Get user email for sending confirmation email
+    let userEmail = null;
+    try {
+      const [userRows] = await db.query("SELECT email FROM users WHERE id = ?", [decoded.userId]);
+      if (userRows.length > 0) {
+        userEmail = userRows[0].email;
+      }
+    } catch (err) {
+      console.error("Error fetching user email:", err);
+    }
+
+    // Prepare order data for emails
+    const orderData = {
+      orderId,
+      items: itemsData.map(item => ({
+        productName: item.productName || item.name || item.product_name || 'Unknown product',
+        quantity: item.qty,
+        price: item.price,
+        image: item.image || null,
+        attributes: item.attributes || []
+      })),
+      total: total || (subtotal + shipping + (gst || 0)),
+      billing: billingData,
+      paymentMethod: paymentMethod || "bank",
+      customerEmail: userEmail,
+      orderDate: new Date().toLocaleString('en-IN')
+    };
+
+    // Send emails asynchronously (don't block response)
+    // For bank transfers, send payment verification pending email
+    // For Razorpay, send regular confirmation email
+    Promise.all([
+      // Send appropriate email to customer based on payment method
+      userEmail ? (
+        paymentMethod === "bank" 
+          ? sendPaymentVerificationPendingEmail(userEmail, orderData)
+          : sendOrderConfirmationEmail(userEmail, orderData)
+      ) : Promise.resolve({ success: false, error: 'No user email' }),
+      // Send notification email to admin
+      sendAdminOrderNotification('sales@rkindustriesexports.com', orderData)
+    ]).then(results => {
+      console.log('Email sending results:', results);
+    }).catch(err => {
+      console.error('Error sending emails:', err);
+      // Don't fail the order creation if email fails
+    });
+
     res.json({
       success: true,
       orderId: orderId,
@@ -890,17 +941,17 @@ router.post("/create-razorpay-order", async (req, res) => {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
-    const { amount, currency = "INR" } = req.body;
+    const { amount, currency = "USD" } = req.body;
 
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: "Valid amount is required" });
     }
 
-    // Convert amount to paise (smallest currency unit for INR)
-    const amountInPaise = Math.round(amount * 100);
+    // Convert amount to cents (smallest currency unit for USD)
+    const amountInCents = Math.round(amount * 100);
 
     const options = {
-      amount: amountInPaise,
+      amount: amountInCents,
       currency: currency,
       receipt: `receipt_${Date.now()}_${decoded.userId}`,
     };
@@ -1000,6 +1051,47 @@ router.post("/verify-razorpay-payment", async (req, res) => {
         ]
       );
     }
+
+    // Get user email for sending confirmation email
+    let userEmail = null;
+    try {
+      const [userRows] = await db.query("SELECT email FROM users WHERE id = ?", [decoded.userId]);
+      if (userRows.length > 0) {
+        userEmail = userRows[0].email;
+      }
+    } catch (err) {
+      console.error("Error fetching user email:", err);
+    }
+
+    // Prepare order data for emails
+    const orderData = {
+      orderId,
+      items: itemsData.map(item => ({
+        productName: item.productName || item.name || item.product_name || 'Unknown product',
+        quantity: item.qty,
+        price: item.price,
+        image: item.image || null,
+        attributes: item.attributes || []
+      })),
+      total: total || (subtotal + shipping + (gst || 0)),
+      billing: billingData,
+      paymentMethod: "razorpay",
+      customerEmail: userEmail,
+      orderDate: new Date().toLocaleString('en-IN')
+    };
+
+    // Send emails asynchronously (don't block response)
+    Promise.all([
+      // Send confirmation email to customer
+      userEmail ? sendOrderConfirmationEmail(userEmail, orderData) : Promise.resolve({ success: false, error: 'No user email' }),
+      // Send notification email to admin
+      sendAdminOrderNotification('sales@rkindustriesexports.com', orderData)
+    ]).then(results => {
+      console.log('Email sending results:', results);
+    }).catch(err => {
+      console.error('Error sending emails:', err);
+      // Don't fail the order creation if email fails
+    });
 
     res.json({
       success: true,

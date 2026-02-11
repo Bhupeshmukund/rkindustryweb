@@ -1,6 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import { db } from "../config/db.js";
+import { sendPaymentConfirmedEmail, sendOrderCompletedEmail, sendOrderCancelledEmail } from "../utils/emailService.js";
 
 const router = express.Router();
 
@@ -119,6 +120,31 @@ router.patch("/orders/:id/status", async (req, res) => {
       return res.status(400).json({ error: "Cancellation reason is required when cancelling an order" });
     }
 
+    // Get order details before updating (for email)
+    const [orderRows] = await db.query(
+      `SELECT 
+        o.id,
+        o.user_id,
+        o.total_amount,
+        o.status as current_status,
+        o.payment_method,
+        o.billing_data,
+        o.created_at,
+        o.cancellation_reason,
+        u.email as user_email
+      FROM orders o
+      LEFT JOIN users u ON u.id = o.user_id
+      WHERE o.id = ?`,
+      [id]
+    );
+
+    if (orderRows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const order = orderRows[0];
+    const currentStatus = order.current_status;
+
     // Update order with status and cancellation_reason (if provided)
     if (status === "cancelled") {
       await db.query(
@@ -131,6 +157,58 @@ router.patch("/orders/:id/status", async (req, res) => {
         "UPDATE orders SET status = ?, cancellation_reason = NULL WHERE id = ?",
         [status, id]
       );
+    }
+
+    // Send email notification if status changed and customer email exists
+    if (order.user_email && currentStatus !== status) {
+      try {
+        // Get order items
+        const [items] = await db.query(
+          `SELECT 
+            oi.product_name as productName,
+            oi.variant_sku as variantSku,
+            oi.price,
+            oi.quantity,
+            oi.image,
+            oi.attributes
+          FROM order_items oi
+          WHERE oi.order_id = ?
+          ORDER BY oi.id ASC`,
+          [id]
+        );
+
+        // Parse billing data and attributes
+        const billingData = typeof order.billing_data === 'string' 
+          ? JSON.parse(order.billing_data) 
+          : order.billing_data;
+
+        const itemsWithParsedAttributes = items.map(item => ({
+          ...item,
+          attributes: item.attributes ? JSON.parse(item.attributes) : [],
+          quantity: item.quantity
+        }));
+
+        const orderData = {
+          orderId: order.id,
+          items: itemsWithParsedAttributes,
+          total: order.total_amount,
+          billing: billingData,
+          orderDate: order.created_at,
+          cancellationReason: status === "cancelled" ? cancellation_reason : null
+        };
+
+        // Send appropriate email based on status
+        if (status === "processing") {
+          await sendPaymentConfirmedEmail(order.user_email, orderData);
+        } else if (status === "completed") {
+          await sendOrderCompletedEmail(order.user_email, orderData);
+        } else if (status === "cancelled") {
+          await sendOrderCancelledEmail(order.user_email, orderData);
+        }
+      } catch (emailError) {
+        console.error('Error sending status update email:', emailError);
+        // Don't fail the status update if email fails
+      }
     }
 
     res.json({
