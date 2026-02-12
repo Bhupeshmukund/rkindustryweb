@@ -419,7 +419,29 @@ router.get("/products/:productId/edit", async (req, res) => {
 
     const variants = Array.from(variantsMap.values());
 
-    res.json({ product: productRow, variants });
+    // Fetch gallery images
+    const [imageRows] = await db.query(
+      `SELECT id, image, sort_order 
+       FROM product_images 
+       WHERE product_id = ? 
+       ORDER BY sort_order ASC`,
+      [productId]
+    );
+
+    const images = imageRows.map(img => ({
+      id: img.id,
+      image: getImageUrl(img.image),
+      sortOrder: img.sort_order || 0
+    }));
+
+    res.json({ 
+      product: {
+        ...productRow,
+        image: getImageUrl(productRow.image),
+        images: images
+      }, 
+      variants 
+    });
   } catch (err) {
     console.error("PRODUCT EDIT FETCH ERROR:", err);
     res.status(500).json({ error: err.message });

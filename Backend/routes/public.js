@@ -5,7 +5,7 @@ import { db } from "../config/db.js";
 import { uploadPaymentProof } from "../middleware/upload.js";
 import Razorpay from "razorpay";
 import crypto from "crypto";
-import { sendOrderConfirmationEmail, sendAdminOrderNotification, sendPaymentVerificationPendingEmail, sendContactThankYouEmail, sendContactAdminNotification } from "../utils/emailService.js";
+import { sendOrderConfirmationEmail, sendAdminOrderNotification, sendPaymentVerificationPendingEmail, sendContactThankYouEmail, sendContactAdminNotification, sendPasswordResetEmail, sendVerificationEmail } from "../utils/emailService.js";
 
 const router = express.Router();
 
@@ -552,18 +552,95 @@ router.post("/signup", async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert new user
-    const [result] = await db.query(
+    // Generate verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+
+    // Insert new user with verification token
+    // Check if email_verified and verification_token columns exist, if not, add them
+    try {
+      await db.query(
+        "INSERT INTO users (name, email, password, verification_token, verification_token_expiry, email_verified) VALUES (?, ?, ?, ?, ?, ?)",
+        [name, email, hashedPassword, verificationToken, verificationTokenExpiry, 0]
+      );
+    } catch (err) {
+      // If columns don't exist, try to add them
+      if (err.message.includes("Unknown column")) {
+        try {
+          // Add columns one by one with proper error handling
+          // Add columns one by one, ignoring duplicate column errors
+          try {
+            await db.query("ALTER TABLE users ADD COLUMN verification_token VARCHAR(255) NULL");
+          } catch (e) {
+            // Ignore duplicate column errors
+            if (!e.message.includes("Duplicate column") && !e.message.includes("already exists")) {
+              console.error("Error adding verification_token:", e);
+            }
+          }
+          
+          try {
+            await db.query("ALTER TABLE users ADD COLUMN verification_token_expiry DATETIME NULL");
+          } catch (e) {
+            if (!e.message.includes("Duplicate column") && !e.message.includes("already exists")) {
+              console.error("Error adding verification_token_expiry:", e);
+            }
+          }
+          
+          try {
+            await db.query("ALTER TABLE users ADD COLUMN email_verified TINYINT(1) DEFAULT 0");
+          } catch (e) {
+            if (!e.message.includes("Duplicate column") && !e.message.includes("already exists")) {
+              console.error("Error adding email_verified:", e);
+            }
+          }
+          
+          try {
+            await db.query("ALTER TABLE users ADD COLUMN last_verification_sent DATETIME NULL");
+          } catch (e) {
+            if (!e.message.includes("Duplicate column") && !e.message.includes("already exists")) {
+              console.error("Error adding last_verification_sent:", e);
+            }
+          }
+          
+          // Retry insert after adding columns
+          await db.query(
+            "INSERT INTO users (name, email, password, verification_token, verification_token_expiry, email_verified) VALUES (?, ?, ?, ?, ?, ?)",
+            [name, email, hashedPassword, verificationToken, verificationTokenExpiry, 0]
+          );
+        } catch (alterErr) {
+          console.error("Error adding verification columns:", alterErr);
+          // If still fails, insert without verification columns (fallback)
+          await db.query(
       "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
       [name, email, hashedPassword]
     );
+          console.warn("User created without email verification columns. Please run migration script.");
+        }
+      } else {
+        throw err;
+      }
+    }
 
-    // Generate token (optional - you can use a simple token or JWT)
-    const token = jwt.sign(
-      { userId: result.insertId, email },
-      process.env.JWT_SECRET || "your-secret-key",
-      { expiresIn: "7d" }
-    );
+    // Get the inserted user ID
+    let userId;
+    try {
+      const [result] = await db.query("SELECT LAST_INSERT_ID() as id");
+      userId = result[0].id;
+    } catch (err) {
+      // Fallback: query by email to get ID
+      const [userResult] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
+      userId = userResult[0]?.id;
+    }
+
+    // Send verification email
+    try {
+      const baseUrl = process.env.FRONTEND_URL || process.env.API_BASE || 'https://rkindustriesexports.com';
+      const verificationLink = `${baseUrl}/verify-email?token=${verificationToken}`;
+      await sendVerificationEmail(email, name, verificationLink);
+    } catch (emailErr) {
+      console.error("Error sending verification email:", emailErr);
+      // Don't fail signup if email fails
+    }
 
     // Check if user is admin (based on email - can be enhanced later with is_admin column)
     const adminEmails = process.env.ADMIN_EMAILS 
@@ -574,12 +651,14 @@ router.post("/signup", async (req, res) => {
 
     res.json({
       success: true,
-      token,
+      message: "Account created successfully. Please check your email to verify your account.",
+      requiresVerification: true,
       user: {
-        id: result.insertId,
+        id: userId,
         name,
         email,
-        isAdmin: isAdmin
+        isAdmin: isAdmin,
+        emailVerified: false
       }
     });
   } catch (err) {
@@ -599,7 +678,7 @@ router.post("/login", async (req, res) => {
 
     // Find user by email
     const [users] = await db.query(
-      "SELECT id, name, email, password FROM users WHERE email = ?",
+      "SELECT id, name, email, password, email_verified FROM users WHERE email = ?",
       [email]
     );
 
@@ -614,6 +693,15 @@ router.post("/login", async (req, res) => {
 
     if (!isValidPassword) {
       return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // Check if email is verified
+    const emailVerified = user.email_verified === 1 || user.email_verified === true;
+    if (!emailVerified) {
+      return res.status(403).json({ 
+        error: "Please verify your email before logging in. Check your inbox for the verification link.",
+        requiresVerification: true 
+      });
     }
 
     // Generate token
@@ -947,11 +1035,13 @@ router.post("/create-razorpay-order", async (req, res) => {
       return res.status(400).json({ error: "Valid amount is required" });
     }
 
-    // Convert amount to cents (smallest currency unit for USD)
-    const amountInCents = Math.round(amount * 100);
+    // Convert amount to smallest currency unit
+    // For INR: amount in paise (multiply by 100)
+    // For USD: amount in cents (multiply by 100)
+    const amountInSmallestUnit = Math.round(amount * 100);
 
     const options = {
-      amount: amountInCents,
+      amount: amountInSmallestUnit,
       currency: currency,
       receipt: `receipt_${Date.now()}_${decoded.userId}`,
     };
@@ -1147,6 +1237,283 @@ router.post("/contact", async (req, res) => {
   } catch (err) {
     console.error("CONTACT FORM ERROR:", err);
     res.status(500).json({ error: err.message || "Failed to submit contact form" });
+  }
+});
+
+// Verify email endpoint
+router.get("/verify-email", async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({ error: "Verification token is required" });
+    }
+
+    // Find user with this token
+    const [users] = await db.query(
+      "SELECT id, email, verification_token_expiry FROM users WHERE verification_token = ?",
+      [token]
+    );
+
+    if (users.length === 0) {
+      return res.status(400).json({ error: "Invalid or expired verification token" });
+    }
+
+    const user = users[0];
+
+    // Check if token is expired
+    if (user.verification_token_expiry && new Date(user.verification_token_expiry) < new Date()) {
+      return res.status(400).json({ error: "Verification token has expired. Please request a new one." });
+    }
+
+    // Update user as verified
+    await db.query(
+      "UPDATE users SET email_verified = 1, verification_token = NULL, verification_token_expiry = NULL WHERE id = ?",
+      [user.id]
+    );
+
+    res.json({
+      success: true,
+      message: "Email verified successfully! You can now log in."
+    });
+  } catch (err) {
+    console.error("VERIFY EMAIL ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Resend verification email endpoint
+router.post("/resend-verification", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    // Find user
+    const [users] = await db.query(
+      "SELECT id, name, email, email_verified, verification_token, verification_token_expiry, last_verification_sent FROM users WHERE email = ?",
+      [email]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = users[0];
+
+    // Check if already verified
+    const emailVerified = user.email_verified === 1 || user.email_verified === true;
+    if (emailVerified) {
+      return res.status(400).json({ error: "Email is already verified" });
+    }
+
+    // Check cooldown (1 minute = 60 seconds)
+    if (user.last_verification_sent) {
+      const timeSinceLastSent = (new Date() - new Date(user.last_verification_sent)) / 1000; // in seconds
+      if (timeSinceLastSent < 60) {
+        const remainingSeconds = Math.ceil(60 - timeSinceLastSent);
+        return res.status(429).json({ 
+          error: `Please wait ${remainingSeconds} second(s) before requesting another verification email.`,
+          cooldown: remainingSeconds
+        });
+      }
+    }
+
+    // Generate new verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+
+    // Update user with new token and timestamp
+    try {
+      await db.query(
+        "UPDATE users SET verification_token = ?, verification_token_expiry = ?, last_verification_sent = NOW() WHERE id = ?",
+        [verificationToken, verificationTokenExpiry, user.id]
+      );
+    } catch (err) {
+      // If last_verification_sent column doesn't exist, add it
+      if (err.message.includes("Unknown column")) {
+        try {
+          await db.query("ALTER TABLE users ADD COLUMN last_verification_sent DATETIME NULL");
+        } catch (alterErr) {
+          // Ignore if column already exists
+          if (!alterErr.message.includes("Duplicate column") && !alterErr.message.includes("already exists")) {
+            console.error("Error adding last_verification_sent column:", alterErr);
+          }
+        }
+        // Try to update with last_verification_sent
+        try {
+          await db.query(
+            "UPDATE users SET verification_token = ?, verification_token_expiry = ?, last_verification_sent = NOW() WHERE id = ?",
+            [verificationToken, verificationTokenExpiry, user.id]
+          );
+        } catch (updateErr) {
+          // If last_verification_sent column doesn't exist, update without it
+          if (updateErr.message.includes("Unknown column")) {
+            await db.query(
+              "UPDATE users SET verification_token = ?, verification_token_expiry = ? WHERE id = ?",
+              [verificationToken, verificationTokenExpiry, user.id]
+            );
+          } else {
+            throw updateErr;
+          }
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    // Send verification email
+    const baseUrl = process.env.FRONTEND_URL || process.env.API_BASE || 'https://rkindustriesexports.com';
+    const verificationLink = `${baseUrl}/verify-email?token=${verificationToken}`;
+    await sendVerificationEmail(email, user.name, verificationLink);
+
+    res.json({
+      success: true,
+      message: "Verification email sent successfully. Please check your inbox."
+    });
+  } catch (err) {
+    console.error("RESEND VERIFICATION ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Forgot password endpoint
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    // Find user by email
+    const [users] = await db.query(
+      "SELECT id, name, email FROM users WHERE email = ?",
+      [email]
+    );
+
+    // Don't reveal if email exists or not (security best practice)
+    if (users.length === 0) {
+      return res.json({
+        success: true,
+        message: "If an account with that email exists, we have sent a password reset link."
+      });
+    }
+
+    const user = users[0];
+
+    // Generate password reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+
+    // Update user with reset token
+    try {
+      await db.query(
+        "UPDATE users SET password_reset_token = ?, password_reset_token_expiry = ? WHERE id = ?",
+        [resetToken, resetTokenExpiry, user.id]
+      );
+    } catch (err) {
+      // If columns don't exist, add them
+      if (err.message.includes("Unknown column")) {
+        try {
+          // Add password reset columns, ignoring duplicate errors
+          try {
+            await db.query("ALTER TABLE users ADD COLUMN password_reset_token VARCHAR(255) NULL");
+          } catch (e) {
+            if (!e.message.includes("Duplicate column") && !e.message.includes("already exists")) {
+              throw e;
+            }
+          }
+          
+          try {
+            await db.query("ALTER TABLE users ADD COLUMN password_reset_token_expiry DATETIME NULL");
+          } catch (e) {
+            if (!e.message.includes("Duplicate column") && !e.message.includes("already exists")) {
+              throw e;
+            }
+          }
+          
+          await db.query(
+            "UPDATE users SET password_reset_token = ?, password_reset_token_expiry = ? WHERE id = ?",
+            [resetToken, resetTokenExpiry, user.id]
+          );
+        } catch (alterErr) {
+          console.error("Error adding password reset columns:", alterErr);
+          return res.status(500).json({ error: "Failed to process password reset request" });
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    // Send password reset email
+    try {
+      const baseUrl = process.env.FRONTEND_URL || process.env.API_BASE || 'https://rkindustriesexports.com';
+      const resetLink = `${baseUrl}/reset-password?token=${resetToken}`;
+      await sendPasswordResetEmail(email, user.name, resetLink);
+    } catch (emailErr) {
+      console.error("Error sending password reset email:", emailErr);
+      // Don't reveal email sending failure to user
+    }
+
+    res.json({
+      success: true,
+      message: "If an account with that email exists, we have sent a password reset link."
+    });
+  } catch (err) {
+    console.error("FORGOT PASSWORD ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset password endpoint
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: "Token and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters long" });
+    }
+
+    // Find user with this token
+    const [users] = await db.query(
+      "SELECT id, email, password_reset_token_expiry FROM users WHERE password_reset_token = ?",
+      [token]
+    );
+
+    if (users.length === 0) {
+      return res.status(400).json({ error: "Invalid or expired reset token" });
+    }
+
+    const user = users[0];
+
+    // Check if token is expired
+    if (user.password_reset_token_expiry && new Date(user.password_reset_token_expiry) < new Date()) {
+      return res.status(400).json({ error: "Reset token has expired. Please request a new password reset." });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password and clear reset token
+    await db.query(
+      "UPDATE users SET password = ?, password_reset_token = NULL, password_reset_token_expiry = NULL WHERE id = ?",
+      [hashedPassword, user.id]
+    );
+
+    res.json({
+      success: true,
+      message: "Password reset successfully. You can now log in with your new password."
+    });
+  } catch (err) {
+    console.error("RESET PASSWORD ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 

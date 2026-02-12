@@ -1002,3 +1002,126 @@ export const sendContactAdminNotification = async (adminEmail, contactData) => {
     return { success: false, error: error.message };
   }
 };
+
+/**
+ * Send email verification email to new user
+ */
+export const sendVerificationEmail = async (userEmail, userName, verificationLink) => {
+  try {
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #00ACEE; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+          .button { display: inline-block; background: #00ACEE; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Verify Your Email Address</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${userName},</p>
+            <p>Thank you for signing up with RK Industries Exports!</p>
+            <p>Please verify your email address by clicking the button below:</p>
+            <div style="text-align: center;">
+              <a href="${verificationLink}" class="button">Verify Email Address</a>
+            </div>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="word-break: break-all; color: #00ACEE;">${verificationLink}</p>
+            <p>This verification link will expire in 24 hours.</p>
+            <p>If you did not create an account, please ignore this email.</p>
+            <div class="footer">
+              <p>Best regards,<br>RK Industries Exports Team</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const mailOptions = {
+      from: '"RK Industries Exports" <info@rkindustriesexports.com>',
+      to: userEmail,
+      subject: 'Verify Your Email Address - RK Industries Exports',
+      html: htmlContent
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Verification email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending verification email:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send password reset email to user
+ */
+export const sendPasswordResetEmail = async (userEmail, userName, resetLink) => {
+  try {
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #00ACEE; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+          .button { display: inline-block; background: #00ACEE; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+          .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 15px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Reset Your Password</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${userName},</p>
+            <p>We received a request to reset your password for your RK Industries Exports account.</p>
+            <p>Click the button below to reset your password:</p>
+            <div style="text-align: center;">
+              <a href="${resetLink}" class="button">Reset Password</a>
+            </div>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="word-break: break-all; color: #00ACEE;">${resetLink}</p>
+            <div class="warning">
+              <strong>⚠️ Security Notice:</strong> This link will expire in 1 hour. If you did not request a password reset, please ignore this email and your password will remain unchanged.
+            </div>
+            <p>If you did not request this password reset, please contact us immediately.</p>
+            <div class="footer">
+              <p>Best regards,<br>RK Industries Exports Team</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const mailOptions = {
+      from: '"RK Industries Exports" <info@rkindustriesexports.com>',
+      to: userEmail,
+      subject: 'Reset Your Password - RK Industries Exports',
+      html: htmlContent
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Password reset email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+    throw error;
+  }
+};
