@@ -9,6 +9,7 @@ import adminProductRoutes from "./routes/adminProducts.js";
 import adminOrderRoutes from "./routes/adminOrders.js";
 import restaurantOrderRoutes from "./routes/resturantorders.js";
 import publicRoutes from "./routes/public.js";
+import dealershipRoutes from "./routes/dealership.js";
 
 const app = express();
 
@@ -45,6 +46,7 @@ app.use("/api/admin", adminProductRoutes);
 app.use("/api/admin", adminOrderRoutes);
 app.use("/api/admin", restaurantOrderRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/dealership", dealershipRoutes);
 
 // 404 handler for unmatched routes
 app.use((req, res) => {

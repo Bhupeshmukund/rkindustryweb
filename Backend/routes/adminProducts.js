@@ -903,4 +903,159 @@ router.put("/products/:id", uploadProductImages.fields([
   }
 });
 
+  // Increase prices by percentage - All products
+router.post("/products/increase-prices/all", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Authorization token required" });
+    }
+
+    const token = authHeader.substring(7);
+    try {
+      jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
+    } catch (err) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    const { percentage } = req.body;
+
+    if (percentage === undefined || percentage === null || isNaN(percentage)) {
+      return res.status(400).json({ error: "Valid percentage is required" });
+    }
+
+    if (percentage < -99 || percentage > 1000) {
+      return res.status(400).json({ error: "Percentage must be between -99% and 1000%" });
+    }
+
+    const multiplier = 1 + (percentage / 100);
+
+    // Update all variant prices
+    const [result] = await db.query(
+      `UPDATE product_variants SET price = ROUND(price * ?, 2) WHERE price > 0`,
+      [multiplier]
+    );
+
+    const action = percentage >= 0 ? "increased" : "decreased";
+    const absPercentage = Math.abs(percentage);
+    res.json({
+      success: true,
+      message: `Successfully ${action} prices by ${absPercentage}% for all products`,
+      variantsUpdated: result.affectedRows
+    });
+  } catch (err) {
+    console.error("INCREASE ALL PRICES ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Increase prices by percentage - Single product
+router.post("/products/increase-prices/product/:productId", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Authorization token required" });
+    }
+
+    const token = authHeader.substring(7);
+    try {
+      jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
+    } catch (err) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    const { productId } = req.params;
+    const { percentage } = req.body;
+
+    if (percentage === undefined || percentage === null || isNaN(percentage)) {
+      return res.status(400).json({ error: "Valid percentage is required" });
+    }
+
+    if (percentage < -99 || percentage > 1000) {
+      return res.status(400).json({ error: "Percentage must be between -99% and 1000%" });
+    }
+
+    // Check if product exists
+    const [[product]] = await db.query("SELECT id FROM products WHERE id = ?", [productId]);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    const multiplier = 1 + (percentage / 100);
+
+    // Update all variant prices for this product
+    const [result] = await db.query(
+      `UPDATE product_variants SET price = ROUND(price * ?, 2) WHERE product_id = ? AND price > 0`,
+      [multiplier, productId]
+    );
+
+    const action = percentage >= 0 ? "increased" : "decreased";
+    const absPercentage = Math.abs(percentage);
+    res.json({
+      success: true,
+      message: `Successfully ${action} prices by ${absPercentage}% for product`,
+      variantsUpdated: result.affectedRows
+    });
+  } catch (err) {
+    console.error("INCREASE PRODUCT PRICES ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Increase prices by percentage - Category
+router.post("/products/increase-prices/category/:categoryId", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Authorization token required" });
+    }
+
+    const token = authHeader.substring(7);
+    try {
+      jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
+    } catch (err) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    const { categoryId } = req.params;
+    const { percentage } = req.body;
+
+    if (percentage === undefined || percentage === null || isNaN(percentage)) {
+      return res.status(400).json({ error: "Valid percentage is required" });
+    }
+
+    if (percentage < -99 || percentage > 1000) {
+      return res.status(400).json({ error: "Percentage must be between -99% and 1000%" });
+    }
+
+    // Check if category exists
+    const [[category]] = await db.query("SELECT id FROM categories WHERE id = ?", [categoryId]);
+    if (!category) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+
+    const multiplier = 1 + (percentage / 100);
+
+    // Update all variant prices for products in this category
+    const [result] = await db.query(
+      `UPDATE product_variants pv
+       INNER JOIN products p ON p.id = pv.product_id
+       SET pv.price = ROUND(pv.price * ?, 2)
+       WHERE p.category_id = ? AND pv.price > 0`,
+      [multiplier, categoryId]
+    );
+
+    const action = percentage >= 0 ? "increased" : "decreased";
+    const absPercentage = Math.abs(percentage);
+    res.json({
+      success: true,
+      message: `Successfully ${action} prices by ${absPercentage}% for category`,
+      variantsUpdated: result.affectedRows
+    });
+  } catch (err) {
+    console.error("INCREASE CATEGORY PRICES ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

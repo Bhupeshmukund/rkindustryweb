@@ -896,7 +896,7 @@ router.post("/create-order", uploadPaymentProof.single("paymentProof"), async (r
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
-    const { billing, items, subtotal, gst, total, paymentMethod } = req.body;
+    const { billing, items, subtotal, gst, shipping, total, paymentMethod } = req.body;
     
     // Parse JSON fields if they are strings
     const billingData = typeof billing === 'string' ? JSON.parse(billing) : billing;
@@ -904,6 +904,25 @@ router.post("/create-order", uploadPaymentProof.single("paymentProof"), async (r
 
     if (!itemsData || itemsData.length === 0) {
       return res.status(400).json({ error: "Order items are required" });
+    }
+
+    // Validate minimum order amount
+    // For bank transfers, total is always in USD, convert to INR if country is India
+    const orderCurrency = billingData?.country === "India" ? "INR" : "USD";
+    let minimumOrderAmount;
+    if (orderCurrency === "INR") {
+      minimumOrderAmount = 20000; // ₹20,000 minimum for Indian orders
+      // Convert USD total to INR (using approximate exchange rate of 100)
+      // This is a safety check; frontend validation should catch this first
+      const orderAmountInINR = Math.ceil(total * 100); // Approximate exchange rate
+      if (orderAmountInINR < minimumOrderAmount) {
+        return res.status(400).json({ error: `Minimum order amount is ₹${minimumOrderAmount.toLocaleString('en-IN')}. Your current order total is ₹${orderAmountInINR.toLocaleString('en-IN')}.` });
+      }
+    } else {
+      minimumOrderAmount = 200; // $200 minimum for USD orders
+      if (total < minimumOrderAmount) {
+        return res.status(400).json({ error: `Minimum order amount is $${minimumOrderAmount.toFixed(2)}. Your current order total is $${total.toFixed(2)}.` });
+      }
     }
 
     // Handle payment proof file upload
@@ -921,7 +940,7 @@ router.post("/create-order", uploadPaymentProof.single("paymentProof"), async (r
        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
       [
         decoded.userId,
-        total || (subtotal + (gst || 0)),
+        total || (subtotal + (gst || 0) + (shipping || 0)),
         "pending",
         paymentMethod || "bank",
         paymentProofPath,
@@ -1080,10 +1099,28 @@ router.post("/verify-razorpay-payment", async (req, res) => {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature, billing, items, subtotal, gst, total } = req.body;
+    const { razorpayOrderId, razorpayPaymentId, razorpaySignature, billing, items, subtotal, gst, shipping, total, currency, exchangeRate } = req.body;
 
     if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
       return res.status(400).json({ error: "Payment verification details are required" });
+    }
+
+    // Validate minimum order amount
+    const orderCurrency = currency || (billing?.country === "India" ? "INR" : "USD");
+    let minimumOrderAmount;
+    if (orderCurrency === "INR") {
+      minimumOrderAmount = 20000; // ₹20,000 minimum for Indian orders
+      // Convert USD total to INR using exchange rate
+      const rate = exchangeRate || 100; // Fallback to 100 if not provided
+      const orderAmountInINR = Math.ceil(total * rate);
+      if (orderAmountInINR < minimumOrderAmount) {
+        return res.status(400).json({ error: `Minimum order amount is ₹${minimumOrderAmount.toLocaleString('en-IN')}. Your current order total is ₹${orderAmountInINR.toLocaleString('en-IN')}.` });
+      }
+    } else {
+      minimumOrderAmount = 200; // $200 minimum for USD orders
+      if (total < minimumOrderAmount) {
+        return res.status(400).json({ error: `Minimum order amount is $${minimumOrderAmount.toFixed(2)}. Your current order total is $${total.toFixed(2)}.` });
+      }
     }
 
     // Verify the payment signature
@@ -1111,7 +1148,7 @@ router.post("/verify-razorpay-payment", async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
       [
         decoded.userId,
-        total || (subtotal + (gst || 0)),
+        total || (subtotal + (gst || 0) + (shipping || 0)),
         "paid", // Set status as paid since payment is verified
         "razorpay",
         JSON.stringify({ orderId: razorpayOrderId, paymentId: razorpayPaymentId, signature: razorpaySignature }),

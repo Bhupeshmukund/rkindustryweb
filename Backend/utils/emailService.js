@@ -1125,3 +1125,184 @@ export const sendPasswordResetEmail = async (userEmail, userName, resetLink) => 
     throw error;
   }
 };
+
+/**
+ * Send thank you email to dealer after dealership application submission
+ */
+export const sendDealershipThankYouEmail = async (dealerEmail, applicationData) => {
+  try {
+    const { companyName, contactPersonName, country, city } = applicationData;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #00ACEE; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+          .message-box { background: white; padding: 15px; margin: 15px 0; border-radius: 4px; border-left: 4px solid #00ACEE; }
+          .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Thank You for Your Interest</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${contactPersonName || 'Valued Partner'},</p>
+            <p>Thank you for filling out the dealership application form for R.K Industries!</p>
+            <p>We have successfully received your application and our team will review it carefully.</p>
+            
+            <div class="message-box">
+              <h3 style="margin-top: 0;">Application Details:</h3>
+              <p><strong>Company Name:</strong> ${companyName || 'N/A'}</p>
+              <p><strong>Country:</strong> ${country || 'N/A'}</p>
+              ${city ? `<p><strong>City:</strong> ${city}</p>` : ''}
+            </div>
+
+            <p>Our team will review your application and get back to you within 3-5 business days. We appreciate your interest in becoming an authorized distributor for R.K Industries.</p>
+            
+            <p>If you have any questions or need to provide additional information, please feel free to contact us:</p>
+            <p><strong>Email:</strong> info@rkindustriesexports.com</p>
+            <p><strong>Phone:</strong> +91-8685933785</p>
+
+            <p>We look forward to the possibility of partnering with you!</p>
+            <p>Best regards,<br>R.K Industries Team</p>
+          </div>
+          <div class="footer">
+            <p>R.K Industries<br>
+            India's Trusted Manufacturer of Laboratory & Civil Testing Equipment</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const mailOptions = {
+      from: `"R.K Industries" <info@rkindustriesexports.com>`,
+      to: dealerEmail,
+      subject: `Thank You for Your Dealership Application - R.K Industries`,
+      html: htmlContent
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Dealership thank you email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending dealership thank you email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send dealership application notification email to admin
+ */
+export const sendDealershipAdminNotification = async (adminEmail, applicationData) => {
+  try {
+    const {
+      companyName,
+      country,
+      city,
+      contactPersonName,
+      designation,
+      email,
+      mobileNumber,
+      natureOfBusiness,
+      yearsInBusiness,
+      warehouseFacility,
+      briefMessage,
+      applicationId
+    } = applicationData;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #dc3545; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+          .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+          .alert { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 4px; }
+          .info-box { background: white; padding: 15px; margin: 15px 0; border-radius: 4px; border-left: 4px solid #dc3545; }
+          .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+          .section { margin: 20px 0; }
+          .section h3 { color: #dc3545; margin-top: 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>New Dealership Application Received</h1>
+          </div>
+          <div class="content">
+            <div class="alert">
+              <strong>New Application Alert!</strong> A new dealership application has been submitted and requires your review.
+            </div>
+            
+            <div class="info-box">
+              <h3 style="margin-top: 0;">Application ID: #${applicationId || 'N/A'}</h3>
+              <p><strong>Submitted:</strong> ${new Date().toLocaleString('en-IN')}</p>
+            </div>
+
+            <div class="section">
+              <h3>Company Information</h3>
+              <p><strong>Company Name:</strong> ${companyName || 'N/A'}</p>
+              <p><strong>Country:</strong> ${country || 'N/A'}</p>
+              ${city ? `<p><strong>City:</strong> ${city}</p>` : ''}
+            </div>
+
+            <div class="section">
+              <h3>Contact Information</h3>
+              <p><strong>Contact Person:</strong> ${contactPersonName || 'N/A'}</p>
+              ${designation ? `<p><strong>Designation:</strong> ${designation}</p>` : ''}
+              <p><strong>Email:</strong> <a href="mailto:${email}">${email || 'N/A'}</a></p>
+              <p><strong>Mobile Number:</strong> <a href="tel:${mobileNumber}">${mobileNumber || 'N/A'}</a></p>
+            </div>
+
+            <div class="section">
+              <h3>Business Details</h3>
+              <p><strong>Nature of Business:</strong> ${natureOfBusiness || 'N/A'}</p>
+              <p><strong>Years in Business:</strong> ${yearsInBusiness || 'N/A'}</p>
+              <p><strong>Warehouse Facility:</strong> ${warehouseFacility || 'N/A'}</p>
+            </div>
+
+            ${briefMessage ? `
+            <div class="section">
+              <h3>Additional Message</h3>
+              <p style="white-space: pre-wrap; background: white; padding: 15px; border-radius: 4px;">${briefMessage}</p>
+            </div>
+            ` : ''}
+
+            <p><strong>Action Required:</strong> Please review this application and respond to the applicant at your earliest convenience.</p>
+            <p>You can contact the applicant directly at: <a href="mailto:${email}">${email}</a></p>
+          </div>
+          <div class="footer">
+            <p>R.K Industries Admin Portal</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const mailOptions = {
+      from: `"R.K Industries" <${process.env.SMTP_USER || 'sales@rkindustriesexports.com'}>`,
+      to: adminEmail,
+      subject: `New Dealership Application - ${companyName || 'New Application'}`,
+      html: htmlContent,
+      replyTo: email // Allow admin to reply directly to the applicant
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Dealership admin notification email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending dealership admin notification email:', error);
+    return { success: false, error: error.message };
+  }
+};

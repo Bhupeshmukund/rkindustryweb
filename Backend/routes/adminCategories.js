@@ -40,6 +40,64 @@ router.post(
   }
 );
 
+router.put(
+  "/categories/:id",
+  uploadCategoryImage.single("image"),
+  async (req, res) => {
+    try {
+      const categoryId = parseInt(req.params.id);
+      const { name } = req.body;
+
+      if (!categoryId || isNaN(categoryId)) {
+        return res.status(400).json({ error: "Invalid category ID" });
+      }
+
+      if (!name || name.trim() === "") {
+        return res.status(400).json({ error: "Category name required" });
+      }
+
+      // Check if category exists
+      const [[category]] = await db.query(
+        "SELECT id, name, image FROM categories WHERE id = ?",
+        [categoryId]
+      );
+
+      if (!category) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+
+      const slug = slugify(name, { lower: true });
+      let imageUrl = category.image; // Keep existing image if no new one uploaded
+
+      // If new image is uploaded, use it
+      if (req.file) {
+        imageUrl = `/uploads/categories/${req.file.filename}`;
+      }
+
+      // Update category
+      await db.query(
+        "UPDATE categories SET name = ?, slug = ?, image = ? WHERE id = ?",
+        [name, slug, imageUrl, categoryId]
+      );
+
+      res.json({
+        success: true,
+        message: "Category updated successfully",
+        category: {
+          id: categoryId,
+          name,
+          slug,
+          image: imageUrl
+        }
+      });
+
+    } catch (err) {
+      console.error("UPDATE CATEGORY ERROR:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 router.delete("/categories/:id", async (req, res) => {
   try {
     const categoryId = parseInt(req.params.id);
