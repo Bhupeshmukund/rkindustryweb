@@ -2,15 +2,13 @@ import nodemailer from 'nodemailer';
 import { fetchUSDToINR, isIndia, formatEmailPrice } from './emailPriceHelper.js';
 
 // Create reusable transporter object using SMTP transport
-// Note: Authenticate with the main account (bhupesh@rkindustriesexports.com)
-// but send emails from the alias (sales@rkindustriesexports.com)
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.hostinger.com',
   port: parseInt(process.env.SMTP_PORT || '465'),
   secure: true, // true for 465, false for other ports
   auth: {
-    user: process.env.SMTP_USER || 'bhupesh@rkindustriesexports.com',
-    pass: process.env.SMTP_PASSWORD || 'Bhupesh981@'
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASSWORD
   }
 });
 

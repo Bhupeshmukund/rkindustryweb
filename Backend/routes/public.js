@@ -156,6 +156,7 @@ router.get("/categories/:slug/products", async (req, res) => {
          p.name as product_name,
          p.image as product_image,
          p.description as product_description,
+         p.additional_description as product_additional_description,
          p.category_id as category_id,
          c.slug as category_slug,
          c.name as category_name,
@@ -262,6 +263,7 @@ router.get("/products/:id", async (req, res) => {
          p.name as product_name,
          p.image as product_image,
          p.description as product_description,
+         p.additional_description as product_additional_description,
          p.category_id as category_id,
          c.slug as category_slug,
          c.name as category_name,
@@ -358,10 +360,11 @@ router.get("/search", async (req, res) => {
            p.name as product_name,
            p.image as product_image,
            p.description as product_description,
-           p.category_id as category_id,
-           c.slug as category_slug,
-           c.name as category_name,
-           p.is_active as is_active,
+          p.additional_description as product_additional_description,
+          p.category_id as category_id,
+          c.slug as category_slug,
+          c.name as category_name,
+          p.is_active as is_active,
            pv.id as variant_id,
            pv.sku as variant_sku,
            pv.price as variant_price,
@@ -444,6 +447,7 @@ router.get("/search", async (req, res) => {
            p.name as product_name,
            p.image as product_image,
            p.description as product_description,
+           p.additional_description as product_additional_description,
            p.category_id as category_id,
            c.slug as category_slug,
            c.name as category_name,
@@ -1555,4 +1559,3 @@ router.post("/reset-password", async (req, res) => {
 });
 
 export default router;
-
